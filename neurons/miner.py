@@ -451,7 +451,7 @@ async def run() -> None:
         return peername[0] if peername else "unknown"
 
     async def handle_ingest(req: web.Request) -> web.Response:
-        nonlocal _ingest_count
+        nonlocal _ingest_count, _commitment_ingest_counter
         import time as _time
         t0 = _time.perf_counter()
         try:
@@ -501,6 +501,9 @@ async def run() -> None:
                         logger.debug(f"FAISS auto-saved ({store.count()} vectors)")
                     except Exception as exc:
                         logger.warning(f"FAISS auto-save failed: {exc}")
+                _commitment_ingest_counter += 1
+                if _commitment_ingest_counter % COMMITMENT_REBUILD_EVERY == 0:
+                    asyncio.get_running_loop().run_in_executor(None, _rebuild_commitment)
                 if caller_hotkey:
                     wallet_tracker.record_ingest(caller_hotkey, result.cid)
                 if not router.should_store(result.cid):
@@ -607,12 +610,21 @@ async def run() -> None:
             return web.json_response({"error": "Internal error — check miner logs."}, status=500)
 
     async def handle_retrieve(req: web.Request) -> web.Response:
-        """GET /retrieve/{cid} — return stored metadata for a CID (no auth required)."""
+        """GET /retrieve/{cid} — return stored metadata for a CID.
+
+        Public memories are freely readable.  Private namespace memories return
+        404 regardless of whether the CID exists — callers must use an
+        authenticated query to access their own private data.
+        """
         cid = req.match_info.get("cid", "").strip()
         if not cid:
             return web.json_response({"error": "missing cid"}, status=400)
         record = store.get(cid)
         if record is None:
+            return web.json_response({"error": "not found"}, status=404)
+        # Never expose private namespace records via unauthenticated retrieval.
+        from engram.miner.store import _PUBLIC_NS
+        if record.namespace != _PUBLIC_NS:
             return web.json_response({"error": "not found"}, status=404)
         return web.json_response({
             "cid":      record.cid,
@@ -620,10 +632,53 @@ async def run() -> None:
         })
 
     async def handle_delete(req: web.Request) -> web.Response:
-        """DELETE /retrieve/{cid} — permanently remove a stored memory."""
+        """DELETE /retrieve/{cid} — permanently remove a stored memory.
+
+        Public memories require network auth (validator/miner hotkey via
+        verify_request).  Private namespace memories additionally require the
+        caller to prove namespace ownership via namespace_hotkey + namespace_sig
+        + namespace_timestamp_ms in the JSON body.
+        """
         cid = req.match_info.get("cid", "").strip()
         if not cid:
             return web.json_response({"error": "missing cid"}, status=400)
+
+        # Parse optional JSON body (HTTP allows bodies on DELETE).
+        try:
+            body = await req.json()
+        except Exception:
+            body = {}
+
+        # Network-level auth — only registered neurons may delete.
+        try:
+            verify_request(body, "DeleteSynapse")
+        except AuthError as exc:
+            return web.json_response({"error": str(exc)}, status=401)
+
+        record = store.get(cid)
+        if record is None:
+            return web.json_response({"error": "not found"}, status=404)
+
+        # Private namespace — additionally verify the caller owns the namespace.
+        from engram.miner.store import _PUBLIC_NS
+        if record.namespace != _PUBLIC_NS:
+            hk  = body.get("namespace_hotkey") or ""
+            sig = body.get("namespace_sig") or ""
+            ts  = body.get("namespace_timestamp_ms")
+            if not (hk and sig and ts):
+                return web.json_response(
+                    {"error": "Deleting a private namespace memory requires namespace_hotkey, namespace_sig, and namespace_timestamp_ms."},
+                    status=403,
+                )
+            try:
+                ts = int(ts)
+            except (ValueError, TypeError):
+                return web.json_response({"error": "namespace_timestamp_ms must be an integer."}, status=400)
+            if not ns_registry.verify_sig(record.namespace, hk, sig, ts):
+                return web.json_response({"error": "Namespace signature invalid."}, status=403)
+            if ns_registry.owner_hotkey(record.namespace) != hk:
+                return web.json_response({"error": "Hotkey is not the owner of this namespace."}, status=403)
+
         deleted = store.delete(cid)
         if not deleted:
             return web.json_response({"error": "not found"}, status=404)
@@ -635,10 +690,13 @@ async def run() -> None:
         """POST /list — paginate and filter stored memories.
 
         Body (all optional):
-            filter   dict[str, str]  metadata key/value pairs (AND match)
-            limit    int             max results (default 50, max 200)
-            offset   int             skip N records (default 0)
-            namespace str            namespace to list (default public)
+            filter                dict[str, str]  metadata key/value pairs (AND match)
+            limit                 int             max results (default 50, max 200)
+            offset                int             skip N records (default 0)
+            namespace             str             namespace to list (default public)
+            namespace_hotkey      str             required for private namespaces
+            namespace_sig         str             sr25519 ownership signature
+            namespace_timestamp_ms int            Unix ms timestamp for replay prevention
         """
         try:
             body = await req.json()
@@ -648,7 +706,29 @@ async def run() -> None:
         limit     = min(int(body.get("limit", 50)), 200)
         offset    = max(int(body.get("offset", 0)), 0)
         namespace = body.get("namespace") or "__public__"
-        records   = store.list(filter=filter_, limit=limit, offset=offset, namespace=namespace)
+
+        # Private namespace — verify ownership before listing.
+        if namespace != "__public__":
+            hk  = body.get("namespace_hotkey") or ""
+            sig = body.get("namespace_sig") or ""
+            ts  = body.get("namespace_timestamp_ms")
+            if not (hk and sig and ts):
+                return web.json_response(
+                    {"error": "Listing a private namespace requires namespace_hotkey, namespace_sig, and namespace_timestamp_ms."},
+                    status=403,
+                )
+            try:
+                ts = int(ts)
+            except (ValueError, TypeError):
+                return web.json_response({"error": "namespace_timestamp_ms must be an integer."}, status=400)
+            if not ns_registry.exists(namespace):
+                return web.json_response({"error": f"Namespace '{namespace}' not found."}, status=404)
+            if not ns_registry.verify_sig(namespace, hk, sig, ts):
+                return web.json_response({"error": "Namespace signature invalid."}, status=403)
+            if ns_registry.owner_hotkey(namespace) != hk:
+                return web.json_response({"error": "Hotkey is not the owner of this namespace."}, status=403)
+
+        records = store.list(filter=filter_, limit=limit, offset=offset, namespace=namespace)
         return web.json_response({
             "records": records,
             "count":   len(records),
@@ -946,6 +1026,86 @@ async def run() -> None:
             "hotkey": wallet.hotkey.ss58_address,
         })
 
+    # ── Merkle memory commitment ───────────────────────────────────────────────
+    # Cached so /commitment is cheap — recomputed every COMMITMENT_REBUILD_EVERY ingests.
+    _commitment_cache: dict = {"root_hex": None, "count": 0, "built_at": 0.0}
+    _commitment_ingest_counter = 0
+    COMMITMENT_REBUILD_EVERY = 50   # rebuild after every 50 ingests (configurable)
+
+    def _rebuild_commitment() -> None:
+        """Recompute the Merkle root over the full memory corpus."""
+        try:
+            import engram_core as _ec
+            pairs = store.all_cids_and_hashes()
+            if not pairs:
+                _commitment_cache["root_hex"] = "0" * 64
+                _commitment_cache["count"] = 0
+            else:
+                cids, emb_hashes = zip(*pairs)
+                commitment = _ec.build_commitment(list(cids), list(emb_hashes))
+                _commitment_cache["root_hex"] = commitment.root_hex
+                _commitment_cache["count"] = commitment.count
+            _commitment_cache["built_at"] = time.time()
+            logger.debug(f"Commitment rebuilt | memories={_commitment_cache['count']} root={(_commitment_cache['root_hex'] or '')[:16]}…")
+        except Exception as exc:
+            logger.warning(f"Commitment rebuild failed: {exc}")
+
+    async def handle_commitment(req: web.Request) -> web.Response:
+        """GET /commitment — returns the Merkle root of this miner's full memory corpus.
+
+        AI agents and validators can use this root to verify that a specific
+        memory (cid, embedding_hash) is genuinely stored here without downloading
+        the full index.  The root changes whenever a memory is added or removed.
+        """
+        if _commitment_cache["root_hex"] is None:
+            await asyncio.get_running_loop().run_in_executor(None, _rebuild_commitment)
+        return web.json_response({
+            "root_hex":  _commitment_cache["root_hex"],
+            "count":     _commitment_cache["count"],
+            "built_at":  _commitment_cache["built_at"],
+            "hotkey":    wallet.hotkey.ss58_address,
+        })
+
+    async def handle_prove_memory(req: web.Request) -> web.Response:
+        """POST /prove-memory — return a Merkle inclusion proof for one CID.
+
+        Body: {"cid": "v1::...", "embedding_hash": "<64-char hex>"}
+
+        AI agents use this to verify a specific memory is intact without
+        fetching the entire store.  Returns the proof as a JSON object that
+        can be verified offline with engram_core.verify_inclusion().
+        """
+        try:
+            import engram_core as _ec
+            body = await req.json()
+            cid       = body.get("cid", "")
+            emb_hash  = body.get("embedding_hash", "")
+            if not cid or not emb_hash:
+                return web.json_response({"error": "cid and embedding_hash are required"}, status=400)
+
+            if _commitment_cache["root_hex"] is None:
+                await asyncio.get_running_loop().run_in_executor(None, _rebuild_commitment)
+
+            pairs = store.all_cids_and_hashes()
+            if not pairs:
+                return web.json_response({"error": "No memories stored"}, status=404)
+
+            cids, emb_hashes = zip(*pairs)
+            commitment = _ec.build_commitment(list(cids), list(emb_hashes))
+            try:
+                proof = _ec.generate_inclusion_proof(commitment, cid, emb_hash)
+            except ValueError as exc:
+                return web.json_response({"error": str(exc)}, status=404)
+
+            return web.json_response({
+                "root_hex":  commitment.root_hex,
+                "cid":       cid,
+                "proof":     proof.to_json(),
+            })
+        except Exception as exc:
+            logger.error(f"prove-memory error: {exc}")
+            return web.json_response({"error": "Internal error"}, status=500)
+
     async def handle_metagraph(req: web.Request) -> web.Response:
         """Public metagraph snapshot — returns all registered neurons for the leaderboard."""
         try:
@@ -1010,6 +1170,8 @@ async def run() -> None:
     app.router.add_get("/metrics",                  handle_metrics)
     app.router.add_get("/wallet-stats",             handle_wallet_stats)
     app.router.add_get("/wallet-stats/{hotkey}",    handle_wallet_stats)
+    app.router.add_get("/commitment",               handle_commitment)
+    app.router.add_post("/prove-memory",            handle_prove_memory)
 
     runner = web.AppRunner(app, keepalive_timeout=15)
     await runner.setup()

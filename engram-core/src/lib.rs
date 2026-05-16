@@ -1,27 +1,32 @@
 // engram-core/src/lib.rs
 //
-// PyO3 bindings — exposes the Rust CID and proof modules to Python.
+// PyO3 bindings — CID, storage proofs, and Merkle memory commitment.
 //
-// Single-CID usage:
-//   import engram_core
+// CID:
 //   cid = engram_core.generate_cid([0.1, 0.2, 0.3], {}, "v1")
-//   valid = engram_core.verify_cid(cid, [0.1, 0.2, 0.3], {}, "v1")
+//   ok  = engram_core.verify_cid(cid, [0.1, 0.2, 0.3], {}, "v1")
 //
-//   # validator_hotkey_hex: the validator's SR25519 public key as a 64-char hex string
+// Storage proofs (validator ↔ miner):
 //   challenge = engram_core.generate_challenge("v1::abc...", 30, validator_hotkey_hex)
 //   response  = engram_core.generate_response(challenge, [0.1, 0.2, 0.3])
 //   ok        = engram_core.verify_response(challenge, response, [0.1, 0.2, 0.3])
 //
-// Batch usage (preferred for audit sweeps — one nonce, N CIDs, one round trip):
+// Batch proofs:
 //   batch    = engram_core.generate_batch_challenge(["v1::aaa", "v1::bbb"], 30, validator_hotkey_hex)
 //   response = engram_core.generate_batch_response(batch, [[0.1, 0.2], [0.3, 0.4]])
 //   results  = engram_core.verify_batch_response(batch, response, [[0.1, 0.2], [0.3, 0.4]])
-//   # results: list[bool], one per CID
+//
+// Merkle memory commitment (full-corpus integrity):
+//   commitment = engram_core.build_commitment(cids, embedding_hashes)
+//   # commitment.root_hex  — 64-char hex fingerprint of the whole memory set
+//   proof = engram_core.generate_inclusion_proof(commitment, cid, embedding_hash)
+//   ok    = engram_core.verify_inclusion(commitment.root_hex, cid, embedding_hash, proof)
 
 use pyo3::prelude::*;
 use std::collections::BTreeMap;
 
 mod cid;
+mod merkle;
 mod proof;
 
 // ── Helpers ───────────────────────────────────────────────────────────────────
@@ -256,6 +261,168 @@ fn verify_batch_response(
     proof::verify_batch_response(&batch.inner, &response.inner, &embeddings)
 }
 
+// ── Merkle Memory Commitment bindings ─────────────────────────────────────────
+
+/// Python-visible Merkle commitment: fingerprint of an AI's full memory corpus.
+#[pyclass]
+#[derive(Clone)]
+struct MemoryCommitment {
+    inner: merkle::MerkleCommitment,
+}
+
+#[pymethods]
+impl MemoryCommitment {
+    /// 64-char hex fingerprint of the entire memory corpus.
+    /// Store this on-chain or in the agent's context to detect tampering.
+    #[getter]
+    fn root_hex(&self) -> String { hex::encode(self.inner.root) }
+
+    /// Number of distinct memories in this commitment.
+    #[getter]
+    fn count(&self) -> usize { self.inner.leaves.len() }
+}
+
+/// Python-visible inclusion proof for one memory.
+#[pyclass]
+#[derive(Clone)]
+struct MemoryInclusionProof {
+    inner: merkle::InclusionProof,
+}
+
+#[pymethods]
+impl MemoryInclusionProof {
+    /// Hex-encoded leaf hash for the proved memory.
+    #[getter]
+    fn leaf_hex(&self) -> String { hex::encode(self.inner.leaf_hash) }
+
+    /// Number of sibling hashes in the proof (= tree depth = ceil(log2(N))).
+    #[getter]
+    fn depth(&self) -> usize { self.inner.steps.len() }
+
+    /// Serialise proof to JSON for wire transmission.
+    fn to_json(&self) -> String {
+        let steps: Vec<serde_json::Value> = self.inner.steps.iter().map(|s| {
+            serde_json::json!({
+                "sibling": hex::encode(s.sibling),
+                "side": match s.side {
+                    merkle::Side::Left  => "left",
+                    merkle::Side::Right => "right",
+                },
+            })
+        }).collect();
+        serde_json::json!({
+            "leaf_hex": hex::encode(self.inner.leaf_hash),
+            "steps": steps,
+        }).to_string()
+    }
+
+    /// Deserialise a proof from JSON (produced by to_json).
+    #[staticmethod]
+    fn from_json(json_str: &str) -> PyResult<MemoryInclusionProof> {
+        let v: serde_json::Value = serde_json::from_str(json_str)
+            .map_err(|e| pyo3::exceptions::PyValueError::new_err(format!("JSON parse error: {e}")))?;
+
+        let leaf_hex = v["leaf_hex"].as_str().unwrap_or("");
+        let leaf_bytes = hex::decode(leaf_hex)
+            .map_err(|e| pyo3::exceptions::PyValueError::new_err(format!("leaf_hex decode: {e}")))?;
+        let mut leaf_hash = [0u8; 32];
+        if leaf_bytes.len() != 32 {
+            return Err(pyo3::exceptions::PyValueError::new_err("leaf_hex must be 64 hex chars"));
+        }
+        leaf_hash.copy_from_slice(&leaf_bytes);
+
+        let steps_json = v["steps"].as_array()
+            .ok_or_else(|| pyo3::exceptions::PyValueError::new_err("steps must be an array"))?;
+
+        let mut steps = Vec::new();
+        for step in steps_json {
+            let sib_hex = step["sibling"].as_str().unwrap_or("");
+            let sib_bytes = hex::decode(sib_hex)
+                .map_err(|e| pyo3::exceptions::PyValueError::new_err(format!("sibling decode: {e}")))?;
+            let mut sibling = [0u8; 32];
+            if sib_bytes.len() != 32 {
+                return Err(pyo3::exceptions::PyValueError::new_err("sibling must be 64 hex chars"));
+            }
+            sibling.copy_from_slice(&sib_bytes);
+            let side = match step["side"].as_str().unwrap_or("right") {
+                "left"  => merkle::Side::Left,
+                _       => merkle::Side::Right,
+            };
+            steps.push(merkle::ProofStep { sibling, side });
+        }
+
+        Ok(MemoryInclusionProof {
+            inner: merkle::InclusionProof { leaf_hash, steps },
+        })
+    }
+}
+
+/// Build a Merkle commitment over a miner's full memory corpus.
+///
+/// Args:
+///     cids:             list of CID strings (one per stored memory)
+///     embedding_hashes: corresponding SHA-256 hashes of embedding bytes
+///
+/// Returns a MemoryCommitment whose root_hex is a 64-char hex fingerprint
+/// of the entire corpus. Same set of memories → same root, regardless of order.
+#[pyfunction]
+fn build_commitment(
+    cids: Vec<String>,
+    embedding_hashes: Vec<String>,
+) -> PyResult<MemoryCommitment> {
+    if cids.len() != embedding_hashes.len() {
+        return Err(pyo3::exceptions::PyValueError::new_err(
+            "cids and embedding_hashes must have the same length"
+        ));
+    }
+    let cid_refs: Vec<&str> = cids.iter().map(String::as_str).collect();
+    let emb_refs: Vec<&str> = embedding_hashes.iter().map(String::as_str).collect();
+    Ok(MemoryCommitment {
+        inner: merkle::build_commitment(&cid_refs, &emb_refs),
+    })
+}
+
+/// Generate a Merkle inclusion proof for one memory.
+///
+/// Args:
+///     commitment:      MemoryCommitment built from the full corpus
+///     cid:             CID of the memory to prove
+///     embedding_hash:  SHA-256 hex of that memory's embedding bytes
+///
+/// Returns a MemoryInclusionProof, or raises ValueError if the memory is
+/// not in this commitment (i.e., the miner doesn't hold it).
+#[pyfunction]
+fn generate_inclusion_proof(
+    commitment: &MemoryCommitment,
+    cid: &str,
+    embedding_hash: &str,
+) -> PyResult<MemoryInclusionProof> {
+    merkle::generate_inclusion_proof(&commitment.inner, cid, embedding_hash)
+        .map(|inner| MemoryInclusionProof { inner })
+        .ok_or_else(|| pyo3::exceptions::PyValueError::new_err(
+            format!("CID {cid} is not in this commitment — miner does not hold this memory")
+        ))
+}
+
+/// Verify a Merkle inclusion proof against a known root.
+///
+/// Args:
+///     root_hex:        64-char hex root (from on-chain or MemoryCommitment.root_hex)
+///     cid:             CID being proved
+///     embedding_hash:  SHA-256 hex of the embedding
+///     proof:           MemoryInclusionProof from generate_inclusion_proof
+///
+/// Returns True only if the memory is genuinely in the committed corpus.
+#[pyfunction]
+fn verify_inclusion(
+    root_hex: &str,
+    cid: &str,
+    embedding_hash: &str,
+    proof: &MemoryInclusionProof,
+) -> bool {
+    merkle::verify_inclusion_hex(root_hex, cid, embedding_hash, &proof.inner)
+}
+
 // ── Module ────────────────────────────────────────────────────────────────────
 
 #[pymodule]
@@ -277,5 +444,11 @@ fn engram_core(m: &Bound<'_, PyModule>) -> PyResult<()> {
     m.add_function(wrap_pyfunction!(generate_batch_challenge, m)?)?;
     m.add_function(wrap_pyfunction!(generate_batch_response, m)?)?;
     m.add_function(wrap_pyfunction!(verify_batch_response, m)?)?;
+    // Merkle memory commitment
+    m.add_class::<MemoryCommitment>()?;
+    m.add_class::<MemoryInclusionProof>()?;
+    m.add_function(wrap_pyfunction!(build_commitment, m)?)?;
+    m.add_function(wrap_pyfunction!(generate_inclusion_proof, m)?)?;
+    m.add_function(wrap_pyfunction!(verify_inclusion, m)?)?;
     Ok(())
 }
