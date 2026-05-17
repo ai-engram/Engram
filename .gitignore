@@ -20,3 +20,4 @@ data/
 *.zip
 tsconfig.tsbuildinfo
 .vercel
+mobile/node_modules/
