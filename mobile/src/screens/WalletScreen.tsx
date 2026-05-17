@@ -1,17 +1,8 @@
-/**
- * Wallet — sr25519 keypair management.
- *
- * Private key stays in the device secure enclave (Expo SecureStore).
- * The public key (hotkey) is what gets registered on Bittensor via the cloud node.
- *
- * We also show raw Bittensor metagraph data fetched via direct Substrate JSON-RPC
- * — no SDK, no native deps. Pure HTTPS.
- */
-
 import React, { useEffect, useState } from 'react';
 import {
   ActivityIndicator,
   Alert,
+  Clipboard,
   ScrollView,
   StyleSheet,
   Text,
@@ -24,143 +15,214 @@ import { gateway } from '../services/gateway';
 
 export default function WalletScreen() {
   const insets = useSafeAreaInsets();
-  const [keypair,    setKeypair]    = useState<KeyPair | null>(null);
-  const [metagraph,  setMetagraph]  = useState<Record<string, unknown> | null>(null);
+  const [keypair, setKeypair] = useState<KeyPair | null>(null);
+  const [metagraph, setMetagraph] = useState<Record<string, unknown> | null>(null);
   const [generating, setGenerating] = useState(false);
-  const [loading,    setLoading]    = useState(true);
+  const [loading, setLoading] = useState(true);
+  const [phraseVisible, setPhraseVisible] = useState(false);
+  const [copied, setCopied] = useState(false);
 
   useEffect(() => {
     (async () => {
       const kp = await loadKeypair();
       setKeypair(kp);
       setLoading(false);
-      if (kp) fetchMetagraph();
+      if (kp) fetchMeta();
     })();
   }, []);
 
-  const fetchMetagraph = async () => {
+  const fetchMeta = async () => {
     try {
       const data = await gateway.getMetagraph(450);
       setMetagraph(data);
-    } catch {
-      // non-critical
-    }
+    } catch {}
   };
 
-  const createWallet = async () => {
+  const create = async () => {
     setGenerating(true);
     try {
       const kp = await generateKeypair();
       setKeypair(kp);
-      fetchMetagraph();
-      Alert.alert(
-        'Wallet Created',
-        'Your 12-word recovery phrase is shown below. Write it down — it cannot be recovered if lost.',
-      );
+      setPhraseVisible(true);
+      fetchMeta();
     } finally {
       setGenerating(false);
     }
   };
 
-  const resetWallet = () => {
+  const copy = (text: string, label: string) => {
+    Clipboard.setString(text);
+    setCopied(true);
+    setTimeout(() => setCopied(false), 2000);
+  };
+
+  const del = () => {
     Alert.alert(
       'Delete Wallet?',
-      'This will permanently delete your keys from this device. Make sure you have your recovery phrase.',
+      'Your keys will be permanently removed from this device. Only do this if you have saved your recovery phrase.',
       [
         { text: 'Cancel', style: 'cancel' },
         {
-          text: 'Delete',
-          style: 'destructive',
-          onPress: async () => {
-            await deleteKeypair();
-            setKeypair(null);
-            setMetagraph(null);
-          },
+          text: 'Delete', style: 'destructive',
+          onPress: async () => { await deleteKeypair(); setKeypair(null); setMetagraph(null); },
         },
-      ],
+      ]
     );
   };
 
   if (loading) {
-    return <View style={styles.center}><ActivityIndicator size="large" color="#7C3AED" /></View>;
+    return <View style={[styles.center, { paddingTop: insets.top }]}><ActivityIndicator size="large" color="#7c3aed" /></View>;
   }
 
   if (!keypair) {
     return (
       <View style={[styles.center, { paddingTop: insets.top }]}>
-        <Text style={styles.bigTitle}>Engram Wallet</Text>
-        <Text style={styles.subtitle}>
-          Your sr25519 mining keypair lives only on this device. It signs gateway requests and identifies your Bittensor miner.
+        <View style={styles.logoCircle}>
+          <Text style={styles.logoEmoji}>⛓</Text>
+        </View>
+        <Text style={styles.createTitle}>Engram Wallet</Text>
+        <Text style={styles.createSub}>
+          Your sr25519 keypair lives only on this device — in the secure enclave.
+          It identifies your miner and signs all gateway requests.
         </Text>
-        <TouchableOpacity style={styles.createBtn} onPress={createWallet} disabled={generating}>
+        <TouchableOpacity style={styles.createBtn} onPress={create} disabled={generating} activeOpacity={0.85}>
           {generating
             ? <ActivityIndicator color="#fff" />
             : <Text style={styles.createBtnText}>Generate Keypair</Text>}
         </TouchableOpacity>
+        <Text style={styles.createNote}>Your private key never leaves this device.</Text>
       </View>
     );
   }
 
   return (
-    <ScrollView style={[styles.container, { paddingTop: insets.top }]}>
-      <Text style={styles.title}>Your Wallet</Text>
+    <ScrollView
+      style={[styles.container, { paddingTop: insets.top }]}
+      showsVerticalScrollIndicator={false}
+      contentContainerStyle={{ paddingBottom: 48 }}
+    >
+      <View style={styles.headerSection}>
+        <Text style={styles.title}>Your Wallet</Text>
+        {metagraph && (
+          <View style={styles.networkPill}>
+            <View style={styles.networkDot} />
+            <Text style={styles.networkText}>Subnet 450 · Block {String(metagraph.block)}</Text>
+          </View>
+        )}
+      </View>
 
-      {/* Hotkey */}
+      {/* Public key */}
       <View style={styles.card}>
-        <Text style={styles.cardLabel}>Hotkey (Public · Safe to share)</Text>
-        <Text style={styles.mono} selectable>{keypair.ss58}</Text>
-        <Text style={[styles.mono, { fontSize: 10, color: '#666', marginTop: 4 }]} selectable>
-          0x{keypair.publicHex}
-        </Text>
+        <View style={styles.cardHeader}>
+          <Text style={styles.cardLabel}>Hotkey · Public Key</Text>
+          <TouchableOpacity onPress={() => copy(keypair.ss58, 'Hotkey')} style={styles.copyBtn}>
+            <Text style={styles.copyText}>{copied ? 'Copied!' : 'Copy'}</Text>
+          </TouchableOpacity>
+        </View>
+        <Text style={styles.monoLg} selectable>{keypair.ss58}</Text>
+        <Text style={styles.monoSm} selectable>0x{keypair.publicHex}</Text>
+        <View style={styles.safeBadge}>
+          <Text style={styles.safeText}>Safe to share</Text>
+        </View>
       </View>
 
       {/* Recovery phrase */}
-      <View style={[styles.card, { borderColor: '#7F1D1D', borderWidth: 1 }]}>
-        <Text style={styles.cardLabel}>Recovery Phrase · PRIVATE — do not share</Text>
-        <View style={styles.phraseGrid}>
-          {keypair.mnemonic.split(' ').map((word, i) => (
-            <View key={i} style={styles.wordChip}>
-              <Text style={styles.wordNum}>{i + 1}</Text>
-              <Text style={styles.wordText}>{word}</Text>
-            </View>
-          ))}
+      <View style={[styles.card, styles.cardDanger]}>
+        <View style={styles.cardHeader}>
+          <Text style={styles.cardLabel}>Recovery Phrase</Text>
+          <TouchableOpacity onPress={() => setPhraseVisible(v => !v)} style={styles.revealBtn}>
+            <Text style={styles.revealText}>{phraseVisible ? 'Hide' : 'Reveal'}</Text>
+          </TouchableOpacity>
         </View>
+        {phraseVisible ? (
+          <>
+            <View style={styles.phraseGrid}>
+              {keypair.mnemonic.split(' ').map((word, i) => (
+                <View key={i} style={styles.wordChip}>
+                  <Text style={styles.wordNum}>{i + 1}</Text>
+                  <Text style={styles.wordText}>{word}</Text>
+                </View>
+              ))}
+            </View>
+            <TouchableOpacity style={styles.copyPhraseBtn} onPress={() => copy(keypair.mnemonic, 'Phrase')}>
+              <Text style={styles.copyPhraseText}>Copy phrase</Text>
+            </TouchableOpacity>
+          </>
+        ) : (
+          <View style={styles.phraseMask}>
+            <Text style={styles.phraseMaskText}>Tap Reveal to show recovery phrase</Text>
+            <Text style={styles.phraseMaskWarn}>Never share this with anyone</Text>
+          </View>
+        )}
       </View>
 
-      {/* Subnet info from raw JSON-RPC */}
+      {/* Subnet info */}
       {metagraph && (
         <View style={styles.card}>
-          <Text style={styles.cardLabel}>Bittensor Subnet 450 (raw JSON-RPC)</Text>
-          <Text style={styles.infoRow}>Network: <Text style={styles.infoVal}>{String(metagraph.network)}</Text></Text>
-          <Text style={styles.infoRow}>Block: <Text style={styles.infoVal}>{String(metagraph.block)}</Text></Text>
-          <Text style={styles.infoRow}>NetUID: <Text style={styles.infoVal}>{String(metagraph.netuid)}</Text></Text>
+          <Text style={styles.cardLabel}>Bittensor Network</Text>
+          <View style={styles.infoGrid}>
+            {[
+              ['Network', String(metagraph.network)],
+              ['NetUID', String(metagraph.netuid)],
+              ['Block', String(metagraph.block)],
+            ].map(([k, v]) => (
+              <View key={k} style={styles.infoRow}>
+                <Text style={styles.infoKey}>{k}</Text>
+                <Text style={styles.infoVal}>{v}</Text>
+              </View>
+            ))}
+          </View>
         </View>
       )}
 
-      <TouchableOpacity style={styles.deleteBtn} onPress={resetWallet}>
-        <Text style={styles.deleteBtnText}>Delete Wallet from Device</Text>
+      {/* Delete */}
+      <TouchableOpacity style={styles.deleteBtn} onPress={del} activeOpacity={0.8}>
+        <Text style={styles.deleteText}>Delete Wallet from Device</Text>
       </TouchableOpacity>
     </ScrollView>
   );
 }
 
 const styles = StyleSheet.create({
-  container:    { flex: 1, backgroundColor: '#0F0F1A', padding: 16 },
-  center:       { flex: 1, backgroundColor: '#0F0F1A', alignItems: 'center', justifyContent: 'center', padding: 32 },
-  bigTitle:     { color: '#fff', fontSize: 28, fontWeight: '800', marginBottom: 12 },
-  title:        { color: '#fff', fontSize: 24, fontWeight: '800', marginBottom: 20 },
-  subtitle:     { color: '#888', fontSize: 14, textAlign: 'center', lineHeight: 20, marginBottom: 32 },
-  createBtn:    { backgroundColor: '#7C3AED', borderRadius: 12, paddingHorizontal: 32, paddingVertical: 16 },
-  createBtnText:{ color: '#fff', fontSize: 16, fontWeight: '800' },
-  card:         { backgroundColor: '#1C1C2E', borderRadius: 12, padding: 16, marginBottom: 16 },
-  cardLabel:    { color: '#888', fontSize: 11, fontWeight: '600', letterSpacing: 0.5, marginBottom: 8, textTransform: 'uppercase' },
-  mono:         { color: '#A78BFA', fontSize: 12, fontFamily: 'monospace' },
-  phraseGrid:   { flexDirection: 'row', flexWrap: 'wrap', gap: 8, marginTop: 4 },
-  wordChip:     { backgroundColor: '#0F0F1A', borderRadius: 6, paddingHorizontal: 10, paddingVertical: 6, flexDirection: 'row', alignItems: 'center', gap: 4 },
-  wordNum:      { color: '#555', fontSize: 11 },
-  wordText:     { color: '#fff', fontSize: 13, fontWeight: '600' },
-  infoRow:      { color: '#888', fontSize: 13, marginBottom: 4 },
-  infoVal:      { color: '#fff', fontWeight: '600' },
-  deleteBtn:    { backgroundColor: '#1C1C2E', borderRadius: 12, padding: 16, alignItems: 'center', marginBottom: 40, borderWidth: 1, borderColor: '#7F1D1D' },
-  deleteBtnText:{ color: '#EF4444', fontSize: 14, fontWeight: '600' },
+  container:      { flex: 1, backgroundColor: '#09090f' },
+  center:         { flex: 1, backgroundColor: '#09090f', alignItems: 'center', justifyContent: 'center', padding: 32 },
+  logoCircle:     { width: 80, height: 80, borderRadius: 40, backgroundColor: '#13131f', alignItems: 'center', justifyContent: 'center', marginBottom: 20, borderWidth: 1, borderColor: 'rgba(124,58,237,0.3)' },
+  logoEmoji:      { fontSize: 36 },
+  createTitle:    { color: '#fff', fontSize: 26, fontWeight: '800', marginBottom: 12, letterSpacing: -0.5 },
+  createSub:      { color: '#6b7280', fontSize: 14, textAlign: 'center', lineHeight: 21, marginBottom: 32 },
+  createBtn:      { backgroundColor: '#7c3aed', borderRadius: 14, paddingHorizontal: 36, paddingVertical: 16, marginBottom: 12 },
+  createBtnText:  { color: '#fff', fontSize: 15, fontWeight: '800' },
+  createNote:     { color: '#374151', fontSize: 12 },
+  headerSection:  { paddingHorizontal: 20, paddingTop: 24, paddingBottom: 4, flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between' },
+  title:          { color: '#fff', fontSize: 24, fontWeight: '800', letterSpacing: -0.5 },
+  networkPill:    { flexDirection: 'row', alignItems: 'center', gap: 5, backgroundColor: '#13131f', borderRadius: 20, paddingHorizontal: 10, paddingVertical: 5 },
+  networkDot:     { width: 6, height: 6, borderRadius: 3, backgroundColor: '#22c55e' },
+  networkText:    { color: '#6b7280', fontSize: 11 },
+  card:           { marginHorizontal: 16, marginTop: 14, backgroundColor: '#13131f', borderRadius: 16, padding: 18, borderWidth: 1, borderColor: 'rgba(255,255,255,0.06)' },
+  cardDanger:     { borderColor: 'rgba(239,68,68,0.2)' },
+  cardHeader:     { flexDirection: 'row', justifyContent: 'space-between', alignItems: 'center', marginBottom: 12 },
+  cardLabel:      { color: '#6b7280', fontSize: 11, fontWeight: '700', textTransform: 'uppercase', letterSpacing: 0.8 },
+  copyBtn:        { backgroundColor: 'rgba(124,58,237,0.15)', borderRadius: 8, paddingHorizontal: 10, paddingVertical: 4 },
+  copyText:       { color: '#a78bfa', fontSize: 12, fontWeight: '600' },
+  monoLg:         { color: '#a78bfa', fontSize: 13, fontFamily: 'monospace', marginBottom: 4, lineHeight: 18 },
+  monoSm:         { color: '#4b5563', fontSize: 10, fontFamily: 'monospace', lineHeight: 16 },
+  safeBadge:      { marginTop: 10, backgroundColor: 'rgba(34,197,94,0.1)', borderRadius: 6, paddingHorizontal: 8, paddingVertical: 3, alignSelf: 'flex-start' },
+  safeText:       { color: '#22c55e', fontSize: 11, fontWeight: '600' },
+  revealBtn:      { backgroundColor: 'rgba(239,68,68,0.1)', borderRadius: 8, paddingHorizontal: 10, paddingVertical: 4 },
+  revealText:     { color: '#ef4444', fontSize: 12, fontWeight: '600' },
+  phraseGrid:     { flexDirection: 'row', flexWrap: 'wrap', gap: 8 },
+  wordChip:       { backgroundColor: '#0a0a15', borderRadius: 8, paddingHorizontal: 10, paddingVertical: 7, flexDirection: 'row', alignItems: 'center', gap: 5 },
+  wordNum:        { color: '#374151', fontSize: 10, fontWeight: '600' },
+  wordText:       { color: '#e5e7eb', fontSize: 13, fontWeight: '600' },
+  copyPhraseBtn:  { marginTop: 14, backgroundColor: 'rgba(239,68,68,0.08)', borderRadius: 10, paddingVertical: 10, alignItems: 'center' },
+  copyPhraseText: { color: '#ef4444', fontSize: 13, fontWeight: '600' },
+  phraseMask:     { backgroundColor: 'rgba(0,0,0,0.3)', borderRadius: 10, padding: 20, alignItems: 'center' },
+  phraseMaskText: { color: '#6b7280', fontSize: 13, marginBottom: 4 },
+  phraseMaskWarn: { color: '#374151', fontSize: 11 },
+  infoGrid:       { gap: 8 },
+  infoRow:        { flexDirection: 'row', justifyContent: 'space-between', alignItems: 'center' },
+  infoKey:        { color: '#6b7280', fontSize: 13 },
+  infoVal:        { color: '#e5e7eb', fontSize: 13, fontWeight: '600', fontFamily: 'monospace' },
+  deleteBtn:      { marginHorizontal: 16, marginTop: 20, backgroundColor: '#13131f', borderRadius: 14, paddingVertical: 16, alignItems: 'center', borderWidth: 1, borderColor: 'rgba(239,68,68,0.25)' },
+  deleteText:     { color: '#ef4444', fontSize: 14, fontWeight: '600' },
 });

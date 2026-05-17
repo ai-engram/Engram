@@ -129,6 +129,7 @@ function Navbar() {
     { href: "#roadmap", label: "Roadmap", external: false },
     { href: "#sdk", label: "SDK", external: false },
     { href: "#mine", label: "Mine", external: false },
+    { href: "#cloud-mine", label: "Cloud Mine", external: false },
     { href: "/playground", label: "Playground", external: false },
     { href: "/memory", label: "Memory AI", external: false },
     { href: "/dashboard", label: "Dashboard", external: false },
@@ -350,7 +351,7 @@ function Hero() {
 // ── Ticker strip ────────────────────────────────────────────────────────────────
 
 function Strip() {
-  const items = ["recall@K scoring", "HMAC-SHA256 proofs", "Kademlia XOR routing", "HNSW indexing", "PyO3 Rust core", "TAO emissions", "content-addressed CIDs", "subnet · netuid 450", "FAISS · Qdrant"];
+  const items = ["recall@K scoring", "HMAC-SHA256 proofs", "Kademlia XOR routing", "HNSW indexing", "PyO3 Rust core", "TAO emissions", "content-addressed CIDs", "subnet · netuid 450", "FAISS · Qdrant", "cloud mining · Akash", "x402 payments · USDC", "mine from your phone"];
   return (
     <div className="border-y border-white/[0.05] overflow-hidden py-2.5 bg-[#080608]">
       <div className="flex gap-10 animate-[marquee_35s_linear_infinite] whitespace-nowrap" style={{ width: "max-content" }}>
@@ -916,42 +917,57 @@ function Mine() {
           </p>
         </div>
 
-        <div className="grid md:grid-cols-3 gap-3 mb-8">
+        <div className="grid md:grid-cols-2 lg:grid-cols-4 gap-3 mb-8">
           {[
             {
               role: "Miner",
               badge: "41% pool",
               desc: "Store embeddings, serve queries, pass storage proof challenges.",
-              specs: [["RAM", "4 GB minimum"], ["Storage", "100 GB SSD"], ["Runtime", "Python 3.10+"], ["Stake", "Not required"]],
+              specs: [["RAM", "4 GB min"], ["Storage", "100 GB SSD"], ["Runtime", "Python 3.10+"], ["Stake", "Not required"]],
               featured: true,
+              highlight: "border-[#e040fb]/20 bg-[#0e0913]",
+              badgeColor: "text-[#e040fb]/70",
             },
             {
               role: "Validator",
               badge: "41% pool",
               desc: "Score miners on recall@K, latency, and proof rate. Set weights on-chain.",
-              specs: [["RAM", "8 GB minimum"], ["Storage", "20 GB SSD"], ["Stake", "TAO required"], ["Uptime", "Always-on"]],
+              specs: [["RAM", "8 GB min"], ["Storage", "20 GB SSD"], ["Stake", "TAO required"], ["Uptime", "Always-on"]],
               featured: false,
+              highlight: "border-white/[0.06] bg-[#0a0810]",
+              badgeColor: "text-white/25",
+            },
+            {
+              role: "Cloud Mine",
+              badge: "Phone · USDC",
+              desc: "Mine from your phone via a managed node on Akash Network. Pay per hour with USDC.",
+              specs: [["Device", "iOS or Android"], ["Payment", "USDC on Base"], ["Setup", "~3 minutes"], ["Key", "Stays on device"]],
+              featured: false,
+              highlight: "border-[#06b6d4]/20 bg-[#040e10]",
+              badgeColor: "text-[#06b6d4]/70",
             },
             {
               role: "Builder",
               badge: "Free · testnet",
               desc: "Integrate Engram as your vector store using the Python SDK or CLI.",
-              specs: [["Install", "pip install engram-subnet"], ["Models", "Any embedding model"], ["Access", "Free during testnet"], ["Lang", "Python 3.10+"]],
+              specs: [["Install", "pip install engram-subnet"], ["Models", "Any embedding"], ["Access", "Free testnet"], ["Lang", "Python 3.10+"]],
               featured: false,
+              highlight: "border-white/[0.06] bg-[#0a0810]",
+              badgeColor: "text-white/25",
             },
           ].map((r) => (
-            <div key={r.role} className={`border rounded-xl overflow-hidden ${r.featured ? "border-[#e040fb]/20 bg-[#0e0913]" : "border-white/[0.06] bg-[#0a0810]"}`}>
-              <div className="flex items-center justify-between px-6 py-4 border-b border-white/[0.06]">
-                <span className="text-[15px] font-semibold text-white font-sans">{r.role}</span>
-                <span className={`font-mono text-[11px] ${r.featured ? "text-[#e040fb]/70" : "text-white/25"}`}>{r.badge}</span>
+            <div key={r.role} className={`border rounded-xl overflow-hidden ${r.highlight}`}>
+              <div className="flex items-center justify-between px-5 py-4 border-b border-white/[0.06]">
+                <span className="text-[14px] font-semibold text-white font-sans">{r.role}</span>
+                <span className={`font-mono text-[11px] ${r.badgeColor}`}>{r.badge}</span>
               </div>
-              <div className="px-6 py-4">
-                <p className="text-[13px] text-white/40 leading-relaxed mb-5 font-light">{r.desc}</p>
+              <div className="px-5 py-4">
+                <p className="text-[12px] text-white/40 leading-relaxed mb-4 font-light">{r.desc}</p>
                 <div className="space-y-2">
                   {r.specs.map(([k, v]) => (
-                    <div key={k} className="flex items-center justify-between">
-                      <span className="font-mono text-[11px] text-white/25 uppercase tracking-wide">{k}</span>
-                      <span className="font-mono text-[11px] text-white/50">{v}</span>
+                    <div key={k} className="flex items-center justify-between gap-2">
+                      <span className="font-mono text-[10px] text-white/25 uppercase tracking-wide flex-shrink-0">{k}</span>
+                      <span className="font-mono text-[10px] text-white/50 text-right">{v}</span>
                     </div>
                   ))}
                 </div>
@@ -1009,6 +1025,134 @@ python3.13 -m venv .venv
             className="text-[13px] font-mono text-white/40 hover:text-white/70 transition-colors flex items-center gap-1.5">
             View source <ExternalLink className="w-3 h-3" />
           </a>
+        </div>
+      </div>
+    </section>
+  );
+}
+
+// ── Cloud Mine ─────────────────────────────────────────────────────────────────
+
+function CloudMine() {
+  return (
+    <section id="cloud-mine" className="py-24 px-6 border-t border-white/[0.06]">
+      <div className="max-w-6xl mx-auto">
+        <div className="flex flex-col md:flex-row md:items-end md:justify-between gap-4 mb-16">
+          <div>
+            <p className="text-[10px] font-mono tracking-[0.2em] uppercase text-[#06b6d4]/50 mb-3">// cloud mining</p>
+            <h2 className="font-display font-semibold text-[48px] md:text-[60px] text-white leading-[1.0]">
+              Mine from<br />your phone.
+            </h2>
+          </div>
+          <p className="text-[14px] text-white/35 max-w-xs leading-relaxed md:text-right font-light">
+            No VPS. No SSH. A managed miner on Akash Network, paid by the hour with USDC.
+          </p>
+        </div>
+
+        <div className="grid md:grid-cols-[1.1fr_1fr] gap-8 items-start">
+          {/* Left: how it works */}
+          <div className="space-y-4">
+            {[
+              {
+                n: "01",
+                title: "Generate keypair",
+                desc: "Your sr25519 private key is generated and stored in the device secure enclave — it never leaves your phone.",
+                color: "#06b6d4",
+              },
+              {
+                n: "02",
+                title: "Pay with USDC",
+                desc: "Pick a compute tier and duration. Pay on-chain with USDC on Base via Dexter Cash (x402). No account, no KYC.",
+                color: "#06b6d4",
+              },
+              {
+                n: "03",
+                title: "Node provisions on Akash",
+                desc: "A miner container is deployed on Akash Network. Within ~3 minutes it's storing vectors and earning TAO emissions.",
+                color: "#06b6d4",
+              },
+              {
+                n: "04",
+                title: "Watch live stats",
+                desc: "Vectors stored, proof rate, P50 latency, and block height — all live in the app. Stop any time.",
+                color: "#06b6d4",
+              },
+            ].map((step) => (
+              <div key={step.n} className="flex gap-5 group">
+                <div className="flex flex-col items-center gap-1">
+                  <div className="w-8 h-8 rounded-full flex items-center justify-center border border-[#06b6d4]/20 bg-[#06b6d4]/5 flex-shrink-0">
+                    <span className="font-mono text-[10px] text-[#06b6d4]/70">{step.n}</span>
+                  </div>
+                </div>
+                <div className="pb-4 border-b border-white/[0.04] flex-1 group-last:border-0">
+                  <div className="font-semibold text-[14px] text-white mb-1 font-sans">{step.title}</div>
+                  <div className="text-[13px] text-white/35 leading-relaxed font-light">{step.desc}</div>
+                </div>
+              </div>
+            ))}
+
+            <div className="pt-4 grid grid-cols-3 gap-3">
+              {[
+                { tier: "Lite", cpu: "1 vCPU", ram: "2 GB", price: "~$0.10/hr" },
+                { tier: "Standard", cpu: "2 vCPU", ram: "4 GB", price: "~$0.20/hr" },
+                { tier: "Pro", cpu: "4 vCPU", ram: "8 GB", price: "~$0.36/hr" },
+              ].map((t) => (
+                <div key={t.tier} className="border border-white/[0.06] rounded-xl px-4 py-3 bg-[#040e10]">
+                  <div className="font-mono text-[11px] text-[#06b6d4]/70 mb-1.5">{t.tier}</div>
+                  <div className="text-[12px] font-semibold text-white mb-1">{t.price}</div>
+                  <div className="text-[11px] text-white/30">{t.cpu} · {t.ram}</div>
+                </div>
+              ))}
+            </div>
+          </div>
+
+          {/* Right: terminal flow */}
+          <div className="space-y-3">
+            <div className="rounded-xl overflow-hidden border border-white/[0.07]">
+              <div className="flex items-center gap-2 px-4 py-2.5 bg-[#040e10] border-b border-white/[0.06]">
+                <span className="w-2.5 h-2.5 rounded-full bg-[#ff5f57]" />
+                <span className="w-2.5 h-2.5 rounded-full bg-[#febc2e]" />
+                <span className="w-2.5 h-2.5 rounded-full bg-[#28c840]" />
+                <span className="ml-2 text-[11px] text-white/25 font-mono tracking-wide">Gateway API flow</span>
+              </div>
+              <div className="bg-[#020b0d] px-5 py-4 font-mono text-[12px] leading-[2] text-white/50 overflow-x-auto">
+                <div className="text-[#5c6370]"># 1. App gets 402 with payment requirements</div>
+                <div><span className="text-[#e06c75]">GET</span> <span className="text-[#98c379]">/tiers</span> <span className="text-white/20">→ pricing list</span></div>
+                <div className="mt-1 text-[#5c6370]"># 2. Sign USDC tx on Base via Dexter Cash</div>
+                <div><span className="text-[#c678dd]">POST</span> <span className="text-[#98c379]">/sessions</span> <span className="text-white/20">X-Payment: &lt;receipt&gt;</span></div>
+                <div className="mt-1 text-[#5c6370]"># 3. Node provisions on Akash (~3 min)</div>
+                <div><span className="text-[#e06c75]">GET</span> <span className="text-[#98c379]">/sessions/:id</span> <span className="text-[#28c840]">→ active</span></div>
+                <div className="mt-1 text-[#5c6370]"># 4. Live stats every 30s</div>
+                <div><span className="text-white/40">vectors: 1842 · proof_rate: 0.998 · p50: 43ms</span></div>
+              </div>
+            </div>
+
+            <div className="border border-[#06b6d4]/15 rounded-xl px-5 py-4 bg-[#040e10]">
+              <div className="font-mono text-[10px] text-[#06b6d4]/50 mb-3 uppercase tracking-widest">Security Model</div>
+              {[
+                ["Private key", "Stays in device secure enclave — never sent to gateway"],
+                ["Payment", "On-chain USDC receipt verified by Dexter facilitator"],
+                ["Auth", "Every gateway request signed with your sr25519 hotkey"],
+                ["Memory", "Namespace-isolated — only your hotkey can access your data"],
+              ].map(([k, v]) => (
+                <div key={k} className="flex items-start gap-3 py-2 border-b border-white/[0.04] last:border-0">
+                  <span className="text-[#06b6d4]/50 font-mono text-[10px] mt-0.5 flex-shrink-0">→</span>
+                  <div>
+                    <span className="text-[12px] font-semibold text-white/80">{k}</span>
+                    <span className="text-[12px] text-white/30 font-light ml-2">{v}</span>
+                  </div>
+                </div>
+              ))}
+            </div>
+
+            <div className="flex items-center gap-3">
+              <span className="text-[13px] font-mono text-white/30">Get the app:</span>
+              <a href="https://github.com/Dipraise1/-Engram-/tree/main/mobile" target="_blank" rel="noopener noreferrer"
+                className="flex items-center gap-1.5 text-[13px] font-mono text-[#06b6d4]/60 hover:text-[#06b6d4]/90 transition-colors">
+                Build from source <ChevronRight className="w-3 h-3" />
+              </a>
+            </div>
+          </div>
         </div>
       </div>
     </section>
@@ -1159,7 +1303,8 @@ function Footer() {
             <Link href="/playground" className="hover:text-white/60 transition-colors font-mono">playground</Link>
             <Link href="/dashboard" className="hover:text-white/60 transition-colors font-mono">dashboard</Link>
             <a href="#protocol" className="hover:text-white/60 transition-colors font-mono">protocol</a>
-            <a href="#roadmap" className="hover:text-white/60 transition-colors font-mono">roadmap</a>
+            <a href="#mine" className="hover:text-white/60 transition-colors font-mono">mine</a>
+            <a href="#cloud-mine" className="hover:text-white/60 transition-colors font-mono">cloud mine</a>
             <a href="#sdk" className="hover:text-white/60 transition-colors font-mono">sdk</a>
             <Link href="/docs" className="hover:text-white/60 transition-colors font-mono">docs</Link>
             <a href="https://discord.gg/ehpvsyTyJ" target="_blank" rel="noopener noreferrer"
@@ -1198,6 +1343,7 @@ export default function Home() {
       <Roadmap />
       <SDK />
       <Mine />
+      <CloudMine />
       <Community />
       <CTA />
       <Footer />
