@@ -1,61 +1,68 @@
-/**
- * Engram Mobile — mine Engram on Akash Network from your phone.
- *
- * Stack:
- *   Wallet tab     — sr25519 keypair + Bittensor subnet info (raw JSON-RPC)
- *   Dashboard tab  — live mining stats from the active cloud node
- *   Start Mining   — configure tier/duration, pay via x402 (Dexter), launch node
- */
-
-import React, { useEffect } from 'react';
+import { registerRootComponent } from 'expo';
+import React, { useEffect, useState } from 'react';
 import { StatusBar } from 'expo-status-bar';
+import { ActivityIndicator, View } from 'react-native';
 import { NavigationContainer } from '@react-navigation/native';
 import { createBottomTabNavigator } from '@react-navigation/bottom-tabs';
 import { SafeAreaProvider } from 'react-native-safe-area-context';
-import { Text } from 'react-native';
-import { initCrypto } from './src/services/keystore';
 
-import DashboardScreen  from './src/screens/DashboardScreen';
+import { initCrypto } from './src/services/keystore';
+import { loadKeypair, KeyPair } from './src/services/keystore';
+import DashboardScreen   from './src/screens/DashboardScreen';
 import StartMiningScreen from './src/screens/StartMiningScreen';
-import WalletScreen     from './src/screens/WalletScreen';
+import WalletScreen      from './src/screens/WalletScreen';
+import OnboardingScreen  from './src/screens/OnboardingScreen';
+import TabBar            from './src/components/TabBar';
+import { C } from './src/theme';
 
 const Tab = createBottomTabNavigator();
 
-export default function App() {
+function MainTabs() {
+  return (
+    <Tab.Navigator
+      tabBar={props => <TabBar {...props} />}
+      screenOptions={{ headerShown: false }}
+    >
+      <Tab.Screen name="Dashboard"   component={DashboardScreen} />
+      <Tab.Screen name="Start Mining" component={StartMiningScreen} />
+      <Tab.Screen name="Wallet"      component={WalletScreen} />
+    </Tab.Navigator>
+  );
+}
+
+function App() {
+  const [ready,     setReady]     = useState(false);
+  const [hasWallet, setHasWallet] = useState(false);
+
   useEffect(() => {
-    // Initialise the WASM sr25519 backend once at startup.
-    initCrypto().catch(console.error);
+    (async () => {
+      await initCrypto().catch(() => {});
+      const kp = await loadKeypair();
+      setHasWallet(kp !== null);
+      setReady(true);
+    })();
   }, []);
+
+  if (!ready) {
+    return (
+      <View style={{ flex: 1, backgroundColor: C.bg, alignItems: 'center', justifyContent: 'center' }}>
+        <StatusBar style="light" />
+        <ActivityIndicator size="large" color={C.purple} />
+      </View>
+    );
+  }
 
   return (
     <SafeAreaProvider>
+      <StatusBar style="light" />
       <NavigationContainer>
-        <StatusBar style="light" />
-        <Tab.Navigator
-          screenOptions={{
-            headerShown:     false,
-            tabBarStyle:     { backgroundColor: '#09090f', borderTopColor: 'rgba(255,255,255,0.06)', height: 60, paddingBottom: 8 },
-            tabBarActiveTintColor:   '#a78bfa',
-            tabBarInactiveTintColor: '#374151',
-          }}
-        >
-          <Tab.Screen
-            name="Dashboard"
-            component={DashboardScreen}
-            options={{ tabBarIcon: ({ color }) => <Text style={{ fontSize: 18, color }}>⛏</Text> }}
-          />
-          <Tab.Screen
-            name="Start Mining"
-            component={StartMiningScreen}
-            options={{ tabBarIcon: ({ color }) => <Text style={{ fontSize: 18, color }}>▶</Text> }}
-          />
-          <Tab.Screen
-            name="Wallet"
-            component={WalletScreen}
-            options={{ tabBarIcon: ({ color }) => <Text style={{ fontSize: 18, color }}>🔑</Text> }}
-          />
-        </Tab.Navigator>
+        {hasWallet
+          ? <MainTabs />
+          : <OnboardingScreen onComplete={(_kp: KeyPair) => setHasWallet(true)} />
+        }
       </NavigationContainer>
     </SafeAreaProvider>
   );
 }
+
+registerRootComponent(App);
