@@ -3,9 +3,10 @@ FROM python:3.11-slim
 
 WORKDIR /app
 
-# Rust toolchain (needed for maturin / engram-core)
+# Rust toolchain (needed for maturin / engram-core) + runtime libs for faiss/numpy
 RUN apt-get update && apt-get install -y --no-install-recommends \
-    curl build-essential pkg-config libssl-dev git && \
+    curl build-essential pkg-config libssl-dev git \
+    libgomp1 libgmp-dev && \
     curl --proto '=https' --tlsv1.2 -sSf https://sh.rustup.rs | sh -s -- -y --default-toolchain stable && \
     apt-get clean && rm -rf /var/lib/apt/lists/*
 
@@ -35,7 +36,4 @@ ENV SUBTENSOR_ENDPOINT=wss://test.finney.opentensor.ai:443
 
 EXPOSE 8091
 
-CMD ["python", "neurons/miner.py", \
-     "--port", "${MINER_PORT}", \
-     "--netuid", "${NETUID}", \
-     "--subtensor.chain_endpoint", "${SUBTENSOR_ENDPOINT}"]
+CMD ["sh", "-c", "python neurons/miner.py --port ${MINER_PORT} --netuid ${NETUID} --subtensor.chain_endpoint ${SUBTENSOR_ENDPOINT}"]
