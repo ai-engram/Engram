@@ -26,7 +26,6 @@ class QueryHandler:
         self._att_registry = attestation_registry
 
     def handle(self, synapse: QuerySynapse) -> QuerySynapse:
-        from engram.miner.store import _PUBLIC_NS
         from engram.miner.attestation import TrustTier
         start = time.perf_counter()
 

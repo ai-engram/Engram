@@ -29,7 +29,6 @@ import json
 import os
 import time
 from dataclasses import dataclass
-from typing import Any
 
 import aiohttp
 from loguru import logger
@@ -74,7 +73,9 @@ class AkashClient:
         For the MVP, this wraps `akash` CLI via subprocess so we don't have
         to reimplement the full Cosmos tx-building stack in Python.
         """
-        import subprocess, tempfile, shutil
+        import subprocess
+        import tempfile
+        import shutil
 
         if not shutil.which("akash"):
             raise RuntimeError(

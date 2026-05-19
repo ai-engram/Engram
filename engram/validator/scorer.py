@@ -73,10 +73,10 @@ def compute_miner_score(
         float in [0, 1]
     """
     r = float(np.clip(recall, 0.0, 1.0))
-    l = float(np.clip(latency_score(latency_ms), 0.0, 1.0))
+    lat = float(np.clip(latency_score(latency_ms), 0.0, 1.0))
     p = float(np.clip(proof_success_rate, 0.0, 1.0))
 
-    return SCORE_ALPHA * r + SCORE_BETA * l + SCORE_GAMMA * p
+    return SCORE_ALPHA * r + SCORE_BETA * lat + SCORE_GAMMA * p
 
 
 def normalize_scores(scores: dict[str, float]) -> dict[str, float]:

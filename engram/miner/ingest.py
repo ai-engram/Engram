@@ -13,7 +13,7 @@ from typing import Any
 import numpy as np
 from loguru import logger
 
-from engram.config import MAX_METADATA_BYTES, MAX_TEXT_CHARS, CANONICAL_MODEL_VERSION, MIN_INGEST_STAKE_TAO, DP_EPSILON
+from engram.config import MAX_METADATA_BYTES, MAX_TEXT_CHARS, MIN_INGEST_STAKE_TAO, DP_EPSILON
 from engram.miner.embedder import Embedder
 from engram.miner.store import VectorRecord, VectorStore
 from engram.protocol import IngestSynapse

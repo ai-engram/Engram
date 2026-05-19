@@ -37,7 +37,6 @@ defence — not cryptographic impossibility. Combined with private namespaces
 
 from __future__ import annotations
 
-import hashlib
 import json
 import os
 import time

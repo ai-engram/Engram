@@ -201,7 +201,7 @@ def status(
     store, embedder = _get_store_and_embedder()
 
     try:
-        import engram_core
+        import engram_core  # noqa: F401
         rust = "[green]✓ built[/green]"
     except ImportError:
         rust = "[yellow]not built (run: cd engram-core && maturin develop --release)[/yellow]"
@@ -223,7 +223,6 @@ def status(
         return
 
     # ── Live metagraph info ───────────────────────────────────────────────────
-    import time
     net = os.getenv("SUBTENSOR_ENDPOINT") or os.getenv("SUBTENSOR_NETWORK", "test")
     uid = netuid if netuid is not None else int(os.getenv("NETUID", "99"))
 
@@ -258,7 +257,7 @@ def status(
     uids_list = meta.uids.tolist()
 
     # Health-check each miner via SDK
-    from engram.sdk import EngramClient, MinerOfflineError
+    from engram.sdk import EngramClient
     fallback_port = int(os.getenv("MINER_PORT", "8091"))
     fallback_ip = os.getenv("MINER_IP", "127.0.0.1")
 
@@ -309,7 +308,6 @@ def wallet_stats(
 
     # Try to fetch live stats from the running miner first
     import urllib.request as _urllib
-    import urllib.error as _urlerr
 
     def _fetch(url: str):
         try:

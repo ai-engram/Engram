@@ -27,20 +27,19 @@ Usage:
 
 from __future__ import annotations
 
-from typing import Any, Optional, Sequence, cast
+from typing import Any, Sequence
 
 from engram.sdk.client import EngramClient
-from engram.sdk.exceptions import IngestError
 
 try:
     from llama_index.core.schema import (
-        BaseNode,
+        BaseNode,  # noqa: F401
         NodeWithScore,
         TextNode,
     )
     from llama_index.core.vector_stores.types import (
-        BasePydanticVectorStore,
-        VectorStoreQuery,
+        BasePydanticVectorStore,  # noqa: F401
+        VectorStoreQuery,  # noqa: F401
         VectorStoreQueryResult,
     )
 

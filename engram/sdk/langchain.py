@@ -33,15 +33,15 @@ from __future__ import annotations
 from typing import TYPE_CHECKING, Any, Iterable
 
 from engram.sdk.client import EngramClient
-from engram.sdk.exceptions import IngestError, MinerOfflineError
+from engram.sdk.exceptions import IngestError
 
 if TYPE_CHECKING:
     pass
 
 try:
     from langchain_core.documents import Document
-    from langchain_core.embeddings import Embeddings
-    from langchain_core.vectorstores import VectorStore
+    from langchain_core.embeddings import Embeddings  # noqa: F401
+    from langchain_core.vectorstores import VectorStore  # noqa: F401
 
     _LANGCHAIN_AVAILABLE = True
 except ImportError:

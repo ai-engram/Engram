@@ -22,7 +22,6 @@ import asyncio
 import hashlib
 import hmac as _hmac
 import ipaddress
-import json
 import math
 import sqlite3
 import struct

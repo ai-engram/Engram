@@ -61,14 +61,14 @@ class Embedder:
             import torch
             from sentence_transformers import SentenceTransformer
             model_name = os.getenv("LOCAL_EMBEDDING_MODEL", "all-MiniLM-L6-v2")
-            
+
             if torch.cuda.is_available():
                 device = "cuda"
             elif torch.backends.mps.is_available():
                 device = "mps"
             else:
                 device = "cpu"
-                
+
             self._local_model = SentenceTransformer(model_name, device=device)
             logger.info(f"Embedder: local sentence-transformers ({model_name}) on {device}")
         except ImportError:

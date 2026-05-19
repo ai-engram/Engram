@@ -22,12 +22,11 @@ data/node_pool.json. Each entry:
 
 from __future__ import annotations
 
-import asyncio
 import json
 import os
 import threading
 import time
-from dataclasses import asdict, dataclass
+from dataclasses import dataclass
 from pathlib import Path
 from typing import Any
 
