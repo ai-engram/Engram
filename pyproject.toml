@@ -65,7 +65,7 @@ openai = ["openai>=1.30.0"]
 local-embedder = ["sentence-transformers>=3.0.0"]
 
 # Arweave permanent storage upload
-arweave = ["arweave-python-client>=2.0.0"]
+arweave = ["arweave-python-client>=1.0.0"]
 
 # PDF ingestion via ingest_document()
 pdf = ["pypdf>=4.0.0"]
