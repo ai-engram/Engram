@@ -10,7 +10,7 @@ set -euo pipefail
 
 ENGRAM_DIR="/opt/engram"
 ENGRAM_REPO="https://github.com/Dipraise1/-Engram-.git"
-PYTHON="python3.11"
+PYTHON="python3.12"
 
 echo "━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━"
 echo " Engram VPS Setup — Ubuntu 24.04"
@@ -21,7 +21,7 @@ echo "[1/7] Updating system..."
 apt-get update -qq && apt-get upgrade -y -qq
 apt-get install -y -qq \
     git curl wget build-essential pkg-config libssl-dev \
-    python3.11 python3.11-venv python3.11-dev python3-pip \
+    python3.12 python3.12-venv python3.12-dev python3-pip \
     ufw tmux htop jq
 
 # ── 2. Firewall ───────────────────────────────────────────────────────────────
@@ -54,9 +54,9 @@ $PYTHON -m venv .venv
 source .venv/bin/activate
 
 pip install --upgrade pip -q
-# Install engram-subnet + full node deps
-pip install "engram-subnet[node]" -q
-# Install remaining deps not in pypi package
+# Install from local source so the version in this checkout is used
+pip install -e ".[node]" -q
+# Install remaining deps not covered by extras
 pip install -r requirements.txt -q
 
 echo "  Python deps installed."
