@@ -44,6 +44,7 @@ from engram.miner.rate_limiter import RateLimiter
 from engram.miner.wallet_tracker import WalletTracker
 from engram.miner.store import build_store
 from engram.miner.http_synapses import ingest_synapse_from_body, query_synapse_from_body
+from engram.miner.key_share_store import KeyShareStore
 from engram.protocol import IngestSynapse, QuerySynapse
 from engram.storage.dht import DHTRouter, Peer
 from engram.storage.replication import ReplicationManager
@@ -301,6 +302,7 @@ async def run() -> None:
     store              = build_store(backend)
     embedder           = get_embedder()
     ns_registry        = NamespaceRegistry()
+    key_share_store    = KeyShareStore()
     att_registry       = AttestationRegistry(subtensor=subtensor, netuid=netuid)
     from engram.config import DP_EPSILON
     ingest_handler     = IngestHandler(store=store, embedder=embedder,
@@ -717,6 +719,93 @@ async def run() -> None:
             "embedding": record.embedding.tolist(),
             "metadata":  record.metadata,
         })
+
+    async def handle_key_share_store(req: web.Request) -> web.Response:
+        """POST /KeyShareSynapse — store a Shamir key share for a namespace.
+
+        Caller must prove namespace ownership via namespace_sig.  The miner
+        stores one share per namespace and cannot reconstruct the full key alone.
+        """
+        try:
+            body = await req.json()
+        except Exception:
+            return web.json_response({"error": "invalid JSON"}, status=400)
+
+        namespace = (body.get("namespace") or "").strip()
+        if not namespace:
+            return web.json_response({"error": "missing namespace"}, status=400)
+
+        hk  = body.get("namespace_hotkey") or ""
+        sig = body.get("namespace_sig") or ""
+        ts  = body.get("namespace_timestamp_ms")
+        if not (hk and sig and ts):
+            return web.json_response(
+                {"error": "namespace_hotkey, namespace_sig, and namespace_timestamp_ms are required"},
+                status=401,
+            )
+        try:
+            ts = int(ts)
+        except (ValueError, TypeError):
+            return web.json_response({"error": "namespace_timestamp_ms must be an integer"}, status=400)
+        if not ns_registry.verify_sig(namespace, hk, sig, ts):
+            return web.json_response({"error": "Invalid namespace signature"}, status=401)
+        if ns_registry.owner_hotkey(namespace) != hk:
+            return web.json_response({"error": "Hotkey is not the namespace owner"}, status=403)
+
+        share_index = body.get("share_index")
+        share_hex   = body.get("share_hex") or ""
+        threshold   = body.get("threshold")
+        total       = body.get("total")
+        if any(v is None for v in (share_index, threshold, total)) or not share_hex:
+            return web.json_response({"error": "share_index, share_hex, threshold, total are required"}, status=400)
+
+        key_share_store.store(
+            namespace=namespace,
+            share_index=int(share_index),
+            share_hex=share_hex,
+            threshold=int(threshold),
+            total=int(total),
+        )
+        logger.info(f"KeyShare stored | namespace={namespace} | index={share_index}/{total}")
+        return web.json_response({"stored": True})
+
+    async def handle_key_share_retrieve(req: web.Request) -> web.Response:
+        """POST /KeyShareRetrieve — return this miner's share for a namespace.
+
+        Caller must prove namespace ownership via namespace_sig.  Returns the
+        single share stored here; the client must collect K shares to reconstruct.
+        """
+        try:
+            body = await req.json()
+        except Exception:
+            return web.json_response({"error": "invalid JSON"}, status=400)
+
+        namespace = (body.get("namespace") or "").strip()
+        if not namespace:
+            return web.json_response({"error": "missing namespace"}, status=400)
+
+        hk  = body.get("namespace_hotkey") or ""
+        sig = body.get("namespace_sig") or ""
+        ts  = body.get("namespace_timestamp_ms")
+        if not (hk and sig and ts):
+            return web.json_response(
+                {"error": "namespace_hotkey, namespace_sig, and namespace_timestamp_ms are required"},
+                status=401,
+            )
+        try:
+            ts = int(ts)
+        except (ValueError, TypeError):
+            return web.json_response({"error": "namespace_timestamp_ms must be an integer"}, status=400)
+        if not ns_registry.verify_sig(namespace, hk, sig, ts):
+            return web.json_response({"error": "Invalid namespace signature"}, status=401)
+        if ns_registry.owner_hotkey(namespace) != hk:
+            return web.json_response({"error": "Hotkey is not the namespace owner"}, status=403)
+
+        share = key_share_store.get(namespace)
+        if share is None:
+            return web.json_response({"error": "No key share stored for this namespace"}, status=404)
+
+        return web.json_response(share)
 
     async def handle_list(req: web.Request) -> web.Response:
         """POST /list — paginate and filter stored memories.
@@ -1202,6 +1291,8 @@ async def run() -> None:
     app.router.add_get("/retrieve/{cid}",           handle_retrieve)
     app.router.add_delete("/retrieve/{cid}",        handle_delete)
     app.router.add_post("/RepairSynapse",           handle_repair_retrieve)
+    app.router.add_post("/KeyShareSynapse",         handle_key_share_store)
+    app.router.add_post("/KeyShareRetrieve",        handle_key_share_retrieve)
     app.router.add_post("/list",                    handle_list)
     app.router.add_get("/health",                   handle_health)
     app.router.add_get("/stats",                    handle_stats)

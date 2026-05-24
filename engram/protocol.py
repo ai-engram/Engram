@@ -157,3 +157,62 @@ class ChallengeSynapse(_Base):  # type: ignore[misc]
 
     def deserialize(self) -> Any:
         return {"embedding_hash": self.embedding_hash, "proof": self.proof}
+
+
+# ── 4. Key Share Distribution ──────────────────────────────────────────────────
+
+class KeyShareSynapse(_Base):  # type: ignore[misc]
+    """
+    Client deposits one Shamir key share with a miner for threshold decryption.
+
+    The miner stores the share associated with the namespace. It cannot reconstruct
+    the full key alone — that requires K miners to cooperate at retrieval time.
+
+    Auth: namespace_hotkey + namespace_sig + namespace_timestamp_ms (sig-based only).
+    """
+
+    # Request fields
+    namespace: str = Field(description="Namespace this share belongs to.")
+    share_index: int = Field(description="1-based share index (1..total).")
+    share_hex: str = Field(description="Hex-encoded share bytes.")
+    threshold: int = Field(description="Minimum shares needed to reconstruct (k).")
+    total: int = Field(description="Total shares created (n).")
+
+    # Namespace ownership proof
+    namespace_hotkey: str | None = Field(default=None)
+    namespace_sig: str | None = Field(default=None)
+    namespace_timestamp_ms: int | None = Field(default=None)
+
+    # Response fields
+    stored: bool = Field(default=False)
+    error: str | None = Field(default=None)
+
+    def deserialize(self) -> Any:
+        return self.stored
+
+
+class KeyShareRetrieve(_Base):  # type: ignore[misc]
+    """
+    Client retrieves its key share from a miner.
+
+    The miner returns the share only after verifying namespace ownership.
+    The client collects K shares from K different miners and reconstructs locally.
+
+    Auth: namespace_hotkey + namespace_sig + namespace_timestamp_ms.
+    """
+
+    # Request fields
+    namespace: str = Field(description="Namespace to retrieve the share for.")
+    namespace_hotkey: str | None = Field(default=None)
+    namespace_sig: str | None = Field(default=None)
+    namespace_timestamp_ms: int | None = Field(default=None)
+
+    # Response fields
+    share_index: int | None = Field(default=None)
+    share_hex: str | None = Field(default=None)
+    threshold: int | None = Field(default=None)
+    total: int | None = Field(default=None)
+    error: str | None = Field(default=None)
+
+    def deserialize(self) -> Any:
+        return {"share_index": self.share_index, "share_hex": self.share_hex}

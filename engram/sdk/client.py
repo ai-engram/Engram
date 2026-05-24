@@ -1026,5 +1026,97 @@ class EngramClient:
             raise RuntimeError("Grok Vision returned an empty description")
         return description
 
+    # ── Threshold key-share distribution ──────────────────────────────────────
+
+    def distribute_key_shares(
+        self,
+        secret: bytes,
+        miner_urls: list[str],
+        threshold: int = 2,
+    ) -> None:
+        """
+        Split a secret (e.g. a 32-byte namespace key) into N Shamir shares and
+        deposit one share with each miner in `miner_urls`.
+
+        Args:
+            secret:      The raw key bytes to split (e.g. X25519 private key).
+            miner_urls:  List of miner base URLs to distribute to.
+            threshold:   Minimum shares needed to reconstruct (default 2).
+
+        Raises:
+            ValueError:  If namespace or keypair is not configured.
+            EngramError: If any miner rejects the share.
+        """
+        if not self.namespace:
+            raise ValueError("distribute_key_shares requires a namespace")
+        if self._keypair is None:
+            raise ValueError("distribute_key_shares requires a keypair for namespace auth")
+        from engram.sdk.shamir import split_secret
+        shares = split_secret(secret, threshold=threshold, total=len(miner_urls))
+        for url, share in zip(miner_urls, shares):
+            auth = self._namespace_auth()
+            payload = {
+                **auth,
+                "share_index": share.index,
+                "share_hex":   share.to_hex(),
+                "threshold":   share.threshold,
+                "total":       share.total,
+            }
+            client = EngramClient(miner_url=url, timeout=self.timeout)
+            resp = client._post("KeyShareSynapse", payload)
+            if resp.get("error"):
+                raise EngramError(f"Miner {url} rejected key share: {resp['error']}")
+
+    def collect_key_shares(
+        self,
+        miner_urls: list[str],
+    ) -> bytes:
+        """
+        Collect key shares from `miner_urls` and reconstruct the original secret.
+
+        Contacts each miner in order until `threshold` shares are collected.
+        Reconstruction happens entirely client-side — no miner sees the full key.
+
+        Args:
+            miner_urls:  Miner URLs to contact (should be the same set used for distribute).
+
+        Returns:
+            Reconstructed secret bytes.
+
+        Raises:
+            ValueError:  If namespace or keypair is not configured, or too few shares.
+            EngramError: On unexpected errors.
+        """
+        if not self.namespace:
+            raise ValueError("collect_key_shares requires a namespace")
+        if self._keypair is None:
+            raise ValueError("collect_key_shares requires a keypair for namespace auth")
+        from engram.sdk.shamir import KeyShare, reconstruct_secret
+        collected: list[KeyShare] = []
+        threshold: int | None = None
+        for url in miner_urls:
+            auth = self._namespace_auth()
+            payload = {**auth}
+            client = EngramClient(miner_url=url, timeout=self.timeout)
+            try:
+                resp = client._post("KeyShareRetrieve", payload)
+            except Exception:
+                continue
+            if resp.get("error") or resp.get("share_hex") is None:
+                continue
+            share = KeyShare.from_hex(
+                index=resp["share_index"],
+                hex_str=resp["share_hex"],
+                threshold=resp["threshold"],
+                total=resp["total"],
+            )
+            collected.append(share)
+            threshold = share.threshold
+            if threshold is not None and len(collected) >= threshold:
+                break
+        if not collected:
+            raise ValueError("No key shares retrieved from any miner")
+        return reconstruct_secret(collected)
+
     def __repr__(self) -> str:
         return f"EngramClient(miner_url={self.miner_url!r}, timeout={self.timeout})"
