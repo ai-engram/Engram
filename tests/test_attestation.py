@@ -39,6 +39,7 @@ def _registry(tmp_path: Path, stake: float = 0.0) -> AttestationRegistry:
     """Build a registry with a mocked subtensor that returns a fixed stake."""
     subtensor = MagicMock()
     subtensor.get_stake_for_coldkey_and_hotkey.return_value = stake
+    subtensor.get_total_stake_for_hotkey.return_value = stake
     reg = AttestationRegistry(
         path=tmp_path / "attestations.json",
         subtensor=subtensor,
@@ -107,6 +108,7 @@ def test_attest_overwrites_existing(tmp_path):
     _attest(reg, "ns")
     # Stake goes up — re-attest should upgrade tier
     reg._subtensor.get_stake_for_coldkey_and_hotkey.return_value = 500.0
+    reg._subtensor.get_total_stake_for_hotkey.return_value = 500.0
     att = _attest(reg, "ns")
     assert att.trust_tier == TrustTier.VERIFIED
 
@@ -139,6 +141,7 @@ def test_stale_stake_triggers_refresh(tmp_path):
 
     # Stake has now dropped to anonymous
     reg._subtensor.get_stake_for_coldkey_and_hotkey.return_value = 0.0
+    reg._subtensor.get_total_stake_for_hotkey.return_value = 0.0
 
     refreshed = reg.get("ns")
     assert refreshed.trust_tier == TrustTier.ANONYMOUS
@@ -149,6 +152,7 @@ def test_fresh_stake_not_refreshed(tmp_path):
 
     # Drop stake on mock — but record is fresh, should NOT refresh
     reg._subtensor.get_stake_for_coldkey_and_hotkey.return_value = 0.0
+    reg._subtensor.get_total_stake_for_hotkey.return_value = 0.0
 
     att = reg.get("ns")
     # Still sovereign because refresh hasn't triggered

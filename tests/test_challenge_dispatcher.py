@@ -6,8 +6,8 @@ from engram.config import MIN_CHALLENGES_BEFORE_SLASH, SLASH_THRESHOLD
 
 
 @pytest.fixture
-def dispatcher() -> ChallengeDispatcher:
-    return ChallengeDispatcher(validator_hotkey_hex="0" * 64)
+def dispatcher(tmp_path) -> ChallengeDispatcher:
+    return ChallengeDispatcher(validator_hotkey_hex="0" * 64, db_path=tmp_path / "challenges.db")
 
 
 TEST_CID = "v1::" + "a" * 64

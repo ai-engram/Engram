@@ -57,7 +57,12 @@ TRUST_TIER_COMMUNITY:  float = 1.0      # basic skin in the game
 ATTESTATION_STAKE_REFRESH_SECS: int = 600
 
 # ── Anti-spam ──────────────────────────────────────────────────────────────────
-MIN_INGEST_STAKE_TAO: float = 0.001
+MIN_INGEST_STAKE_TAO: float = float(os.getenv("MIN_INGEST_STAKE_TAO", "0.001"))
+
+# ── Slash cooldown ─────────────────────────────────────────────────────────────
+# Slashed miners stay at weight=0 for this many blocks before re-evaluation.
+# 7200 blocks ≈ 24 hours at 12s/block (Bittensor mainnet cadence).
+SLASH_COOLDOWN_BLOCKS: int = int(os.getenv("SLASH_COOLDOWN_BLOCKS", "7200"))
 MAX_METADATA_BYTES: int = 4096
 MAX_TEXT_CHARS: int = 8192
 

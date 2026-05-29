@@ -493,6 +493,7 @@ async def run() -> None:
                     latency_scores=latency_scores,
                     proof_rates=proof_rates,
                     slashed_uids=slashed_uids,
+                    current_block=_block,
                 )
                 try:
                     _block = subtensor.get_current_block() if subtensor else 0

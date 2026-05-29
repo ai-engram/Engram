@@ -13,6 +13,7 @@ from loguru import logger
 
 from engram.validator.reputation import ReputationStore
 from engram.validator.scorer import compute_miner_score, normalize_scores
+from engram.validator.slash import SlashRegistry
 
 
 class RewardManager:
@@ -27,6 +28,7 @@ class RewardManager:
         self.moving_averages: dict[int, float] = {}
         self.alpha: float = 0.1  # 10% recent score, 90% historical (kept for backward compat)
         self.reputation = ReputationStore()
+        self.slash_registry = SlashRegistry()
 
     def set_weights(
         self,
@@ -35,6 +37,7 @@ class RewardManager:
         latency_scores: dict[int, float | None],  # uid → latency_ms
         proof_rates: dict[int, float],            # uid → proof success rate
         slashed_uids: set[int] | None = None,     # uids that failed slash threshold → weight 0
+        current_block: int = 0,
     ) -> bool:
         """
         Compute final scores, normalize, and commit weights to the chain.
@@ -43,13 +46,27 @@ class RewardManager:
         Returns True if weight-setting succeeded.
         """
         uids = list(metagraph.uids.tolist())
-        slashed = slashed_uids or set()
+        hotkeys: list[str] = list(metagraph.hotkeys) if hasattr(metagraph, "hotkeys") else []
+
+        # Merge caller-supplied slashed set with registry cooldowns, and record
+        # any new slash events so they persist across restarts.
+        slashed = set(slashed_uids or set())
+        registry_slashed = self.slash_registry.slashed_uids(current_block)
+        for uid in slashed:
+            hk = hotkeys[uid] if uid < len(hotkeys) else ""
+            pr = proof_rates.get(uid, 0.0)
+            if uid not in registry_slashed:
+                self.slash_registry.slash(
+                    uid, hotkey=hk, current_block=current_block,
+                    proof_rate=pr, total_challenges=0, passed_challenges=0,
+                )
+        slashed |= registry_slashed
 
         if slashed:
             logger.warning(f"Slashing {len(slashed)} miners with weight=0 | uids={sorted(slashed)}")
+            logger.info(self.slash_registry.summary())
 
         raw_scores: dict[int, float] = {}
-        hotkeys: list[str] = list(metagraph.hotkeys) if hasattr(metagraph, "hotkeys") else []
         for uid in uids:
             if uid in slashed:
                 self.moving_averages[uid] = 0.0

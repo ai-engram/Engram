@@ -243,20 +243,16 @@ class AttestationRegistry:
         return att
 
     def _fetch_stake(self, hotkey: str) -> float:
-        """Read TAO stake from metagraph. Returns 0.0 if unavailable."""
+        """Read TAO stake for a hotkey. Returns 0.0 if unavailable."""
         if self._subtensor is None or self._netuid is None:
             logger.debug("Subtensor not configured — stake defaults to 0.0")
             return 0.0
-        try:
-            stake = self._subtensor.get_stake_for_coldkey_and_hotkey(
-                coldkey_ss58=hotkey,
-                hotkey_ss58=hotkey,
-                netuid=self._netuid,
-            )
-            return float(stake)
-        except Exception as exc:
-            logger.warning(f"Stake fetch failed for {hotkey[:12]}…: {exc} — defaulting to 0.0")
+        from engram.miner.ingest import _stake_for_hotkey
+        result = _stake_for_hotkey(self._subtensor, hotkey)
+        if result is None:
+            logger.warning(f"Stake fetch failed for {hotkey[:12]}… — defaulting to 0.0")
             return 0.0
+        return result
 
     # ── Signature verification ─────────────────────────────────────────────────
 

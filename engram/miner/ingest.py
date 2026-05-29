@@ -18,6 +18,38 @@ from engram.miner.embedder import Embedder
 from engram.miner.store import VectorRecord, VectorStore
 from engram.protocol import IngestSynapse
 
+def _stake_for_hotkey(subtensor, hotkey: str) -> float | None:
+    """
+    Return TAO stake for a hotkey, or None if unavailable.
+
+    Tries three approaches in order so it works across Bittensor versions:
+    1. get_total_stake_for_hotkey(hotkey_ss58=...) — correct modern API
+    2. metagraph.S[uid] lookup — works when a synced metagraph is attached
+    3. get_stake_for_coldkey_and_hotkey — legacy fallback (hotkey used as coldkey,
+       which is wrong semantically but some older btcli versions accepted it)
+    """
+    try:
+        stake = subtensor.get_total_stake_for_hotkey(hotkey_ss58=hotkey)
+        return float(stake)
+    except Exception:
+        pass
+    try:
+        meta = subtensor.metagraph(netuid=None) if hasattr(subtensor, "metagraph") else None
+        if meta and hasattr(meta, "hotkeys") and hasattr(meta, "S"):
+            idx = list(meta.hotkeys).index(hotkey)
+            return float(meta.S[idx])
+    except Exception:
+        pass
+    try:
+        stake = subtensor.get_stake_for_coldkey_and_hotkey(
+            coldkey_ss58=hotkey, hotkey_ss58=hotkey
+        )
+        return float(stake)
+    except Exception:
+        pass
+    return None
+
+
 try:
     import engram_core  # Rust PyO3 extension
     _RUST_AVAILABLE = True
@@ -119,14 +151,9 @@ class IngestHandler:
             return  # stake check disabled — local dev mode
         if hotkey is None:
             return  # no hotkey provided (SDK / direct HTTP) — allow
-        try:
-            stake = self._subtensor.get_stake_for_coldkey_and_hotkey(
-                coldkey_ss58=hotkey, hotkey_ss58=hotkey, netuid=self._netuid
-            )
-            tao = float(stake)
-        except Exception:
-            return  # can't check stake — allow (fail open to avoid blocking legit requests)
-
+        tao = _stake_for_hotkey(self._subtensor, hotkey)
+        if tao is None:
+            return  # can't determine stake — fail open
         if tao < MIN_INGEST_STAKE_TAO:
             raise ValueError(
                 f"Your wallet only has τ{tao:.4f} staked on this subnet. "
