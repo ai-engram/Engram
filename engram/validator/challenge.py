@@ -3,15 +3,22 @@ Engram Validator — Storage Challenge Dispatcher
 
 Periodically challenges miners to prove they hold stored CIDs.
 Uses the Rust engram_core module for challenge generation and verification.
+
+Challenge records are persisted to SQLite so slash state survives validator
+restarts. Without persistence, MIN_CHALLENGES_BEFORE_SLASH must be re-accumulated
+from zero after every restart, giving dishonest miners a free grace window.
 """
 
 from __future__ import annotations
 
 import hmac
+import os
 import re
 import secrets
+import sqlite3
 import time
 from dataclasses import dataclass
+from pathlib import Path
 from typing import Any
 
 from loguru import logger
@@ -22,6 +29,8 @@ from engram.config import (
     MIN_CHALLENGES_BEFORE_SLASH,
     SLASH_THRESHOLD,
 )
+
+_DEFAULT_CHALLENGE_DB = Path(os.getenv("CHALLENGE_DB_PATH", "data/challenge_records.db"))
 
 # Reject UIDs that could inject content into log lines or exceed reasonable length.
 _UID_RE = re.compile(r"^[A-Za-z0-9_\-\.]{1,64}$")
@@ -68,15 +77,67 @@ class ChallengeDispatcher:
     """
     Issues storage proof challenges to miners and tracks their results.
     The validator calls `run_challenge_round()` on a timer.
+
+    Challenge records are persisted to SQLite so accumulated proof history and
+    slash state survive validator restarts.
     """
 
-    def __init__(self, validator_hotkey_hex: str = "0" * 64) -> None:
+    def __init__(
+        self,
+        validator_hotkey_hex: str = "0" * 64,
+        db_path: Path = _DEFAULT_CHALLENGE_DB,
+    ) -> None:
         self._records: dict[str, MinerProofRecord] = {}
         self._known_cids: list[str] = []
         self._known_cids_set: set[str] = set()
         self._used_nonces: dict[str, float] = {}
         # 64-char hex SR25519 public key — binds every HMAC proof to this validator identity
         self._validator_hotkey_hex = validator_hotkey_hex
+        self._db = self._open_db(db_path)
+        self._load_records()
+
+    # ── DB helpers ────────────────────────────────────────────────────────────
+
+    def _open_db(self, db_path: Path) -> sqlite3.Connection:
+        db_path.parent.mkdir(parents=True, exist_ok=True)
+        conn = sqlite3.connect(str(db_path), check_same_thread=False)
+        conn.execute("""
+            CREATE TABLE IF NOT EXISTS challenge_records (
+                uid                TEXT PRIMARY KEY,
+                total_challenges   INTEGER NOT NULL DEFAULT 0,
+                passed_challenges  INTEGER NOT NULL DEFAULT 0,
+                last_challenged_at REAL NOT NULL DEFAULT 0
+            )
+        """)
+        conn.commit()
+        return conn
+
+    def _load_records(self) -> None:
+        rows = self._db.execute(
+            "SELECT uid, total_challenges, passed_challenges, last_challenged_at "
+            "FROM challenge_records"
+        ).fetchall()
+        for uid, total, passed, last in rows:
+            self._records[uid] = MinerProofRecord(
+                uid=uid,
+                total_challenges=total,
+                passed_challenges=passed,
+                last_challenged_at=last,
+            )
+        if self._records:
+            logger.info(f"Challenge records loaded | miners={len(self._records)}")
+
+    def _save_record(self, record: MinerProofRecord) -> None:
+        self._db.execute("""
+            INSERT INTO challenge_records
+                (uid, total_challenges, passed_challenges, last_challenged_at)
+            VALUES (?, ?, ?, ?)
+            ON CONFLICT(uid) DO UPDATE SET
+                total_challenges   = excluded.total_challenges,
+                passed_challenges  = excluded.passed_challenges,
+                last_challenged_at = excluded.last_challenged_at
+        """, (record.uid, record.total_challenges, record.passed_challenges, record.last_challenged_at))
+        self._db.commit()
 
     def register_cid(self, cid: str) -> None:
         """Register a CID that the validator can use for challenges."""
@@ -155,6 +216,7 @@ class ChallengeDispatcher:
             logger.warning(f"Challenge FAILED | miner={safe_uid} | rate={record.success_rate:.2f}")
             if record.should_slash:
                 logger.error(f"SLASH THRESHOLD HIT | miner={safe_uid}")
+        self._save_record(record)
 
     def pick_random_cid(self) -> str | None:
         if not self._known_cids:

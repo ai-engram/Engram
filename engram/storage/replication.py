@@ -170,14 +170,26 @@ class ReplicationManager:
 
     # ── Registration ──────────────────────────────────────────────────────────
 
-    def register(self, cid: str) -> ReplicationRecord:
+    def register(
+        self,
+        cid: str,
+        reliability_map: dict[int, float] | None = None,
+    ) -> ReplicationRecord:
         """
         Register a new CID for replication tracking.
         Called immediately after ingest. Persisted to SQLite.
+
+        Args:
+            cid:             Content identifier to track.
+            reliability_map: Optional {uid: reliability_score} from ReputationStore.
+                             When provided, replica assignment blends XOR proximity
+                             with miner reliability — preferring miners with a proven
+                             track record over equally-close but unproven ones.
         """
         if cid in self._records:
             return self._records[cid]
-        assigned = self._router.assign(cid, replication=REPLICATION_FACTOR)
+
+        assigned = self._assign_with_reliability(cid, reliability_map)
         record = ReplicationRecord(
             cid=cid,
             assigned_uids=[p.uid for p in assigned],
@@ -186,6 +198,52 @@ class ReplicationManager:
         self._save_record(record)
         logger.debug(f"Replication registered | cid={cid[:16]}... | assigned={record.assigned_uids}")
         return record
+
+    def _assign_with_reliability(
+        self,
+        cid: str,
+        reliability_map: dict[int, float] | None,
+    ) -> list:
+        """
+        Pick REPLICATION_FACTOR miners for a CID.
+
+        Without a reliability_map: pure XOR distance (original behaviour).
+        With a reliability_map: pull a wider candidate set (up to 3× the
+        replication factor), then re-score each candidate as:
+
+            combined = xor_rank_score * 0.6 + reliability * 0.4
+
+        The top REPLICATION_FACTOR by combined score are chosen. The 0.6/0.4
+        split keeps the DHT's locality property as the dominant signal while
+        giving reliable miners a meaningful edge over unreliable close ones.
+        """
+        from engram.storage.dht import cid_to_key, xor_distance
+
+        if not reliability_map:
+            return self._router.assign(cid, replication=REPLICATION_FACTOR)
+
+        # Pull a wider pool so the re-ranking has candidates to work with.
+        candidate_count = min(REPLICATION_FACTOR * 3, self._router.peer_count())
+        if candidate_count < REPLICATION_FACTOR:
+            return self._router.assign(cid, replication=REPLICATION_FACTOR)
+
+        candidates = self._router.assign(cid, replication=candidate_count)
+        if not candidates:
+            return []
+
+        key = cid_to_key(cid)
+        distances = [xor_distance(p.node_id, key) for p in candidates]
+        max_dist = max(distances) or 1
+
+        scored = []
+        for peer, dist in zip(candidates, distances):
+            xor_score   = 1.0 - dist / max_dist          # 1.0 = closest
+            reliability = reliability_map.get(peer.uid, 0.0)
+            combined    = 0.6 * xor_score + 0.4 * reliability
+            scored.append((combined, peer))
+
+        scored.sort(key=lambda x: -x[0])
+        return [peer for _, peer in scored[:REPLICATION_FACTOR]]
 
     def confirm(self, cid: str, uid: int) -> None:
         """Mark a miner as confirmed to hold a CID (after successful storage proof)."""

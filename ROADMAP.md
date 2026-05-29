@@ -36,7 +36,7 @@ This document tracks where Engram is, where it's going, and what contributions m
 - [ ] **TLS on all miner endpoints** — nginx reverse proxy + Let's Encrypt; `MINER_USE_HTTPS=true` by default
 - [ ] **Slash execution** — validators submit slashing transactions for miners below the proof-rate threshold
 - [ ] **Staking gate on ingest** — minimum TAO stake required to write to the network (anti-spam)
-- [ ] **Stake-weighted replication** — assign replicas to highest-stake miners to align incentives
+- [x] **Stake-weighted replication** — `ReplicationManager.register(reliability_map=...)` blends XOR proximity (60%) with miner reliability score (40%) to prefer proven miners for replica assignment
 - [x] **Miner reputation score** — persistent per-miner reliability record (`ReputationStore`) fed into `RewardManager`; EMA score + confidence discount for new miners; `reliability_map()` available to replication assignment
 - [ ] **Validator consensus** — multi-validator agreement on scores before weight-setting
 - [ ] **PyPI stable release** — `engram-subnet 1.0.0` with stable API contract

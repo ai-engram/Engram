@@ -321,7 +321,7 @@ async def run() -> None:
     if metagraph is not None:
         router.sync_from_metagraph(axons=metagraph.axons, uids=metagraph.uids.tolist())
     replication_mgr = ReplicationManager(router=router)
-    # Pre-register all ground-truth CIDs
+    # Pre-register all ground-truth CIDs (no reliability data yet at boot)
     for cid in ground_truth.all_cids():
         replication_mgr.register(cid)
 
@@ -513,6 +513,7 @@ async def run() -> None:
                 last_repair = now
                 summary = replication_mgr.health_summary()
                 logger.info(f"Replication health | {summary}")
+                logger.info(reward_manager.reputation.summary())
                 await _run_repair_cycle(
                     replication_mgr=replication_mgr,
                     keypair=_keypair,
