@@ -1,4 +1,4 @@
-# Engram - AI
+# Engram - AI - Decenteralized Ai Memory Layer on Bittensor
 
 **Decentralized AI Memory Layer on Bittensor**
 
